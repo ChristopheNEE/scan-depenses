@@ -33,6 +33,8 @@ export default function App() {
   const [settings, setSettings] = useState(loadSettings);
   const [showSettings, setShowSettings] = useState(false);
   const [lightbox, setLightbox] = useState(null);
+  const [undo, setUndo] = useState(null); // dernière dépense supprimée, récupérable quelques secondes
+  const undoTimer = useRef(null);
   const cameraRef = useRef();
   const galleryRef = useRef();
 
@@ -108,12 +110,30 @@ export default function App() {
     setDraft(null);
   }
 
-  async function remove(id) {
-    if (!confirm("Supprimer cette dépense et sa photo ?")) return;
-    await deleteExpense(id);
-    setRows(await listExpenses());
+  async function remove(expense) {
+    const label = `${expense.fournisseur || "Sans nom"} — ${fmt(expense.ttc)} du ${frDate(expense.date)}`;
+    if (!confirm(`Supprimer cette dépense et sa photo ?\n\n${label}`)) return;
+    try {
+      await deleteExpense(expense.id);
+      setRows(await listExpenses());
+    } catch (err) {
+      setError(`Suppression impossible : ${err.message || err}`);
+      return;
+    }
     setDraft(null);
+    clearTimeout(undoTimer.current);
+    setUndo(expense);
+    undoTimer.current = setTimeout(() => setUndo(null), 8000);
   }
+
+  async function restore() {
+    if (!undo) return;
+    clearTimeout(undoTimer.current);
+    await saveExpense(undo);
+    setRows(await listExpenses());
+    setUndo(null);
+  }
+
 
   function updateSettings(s) {
     setSettings(s);
@@ -168,9 +188,10 @@ export default function App() {
       )}
 
       <section className="list">
-        {visible.length === 0 && <p className="empty">Aucune dépense pour {monthLabel(month)}. Scanne ton premier reçu ↓</p>}
+        {visible.length === 0 && <p className="empty">{month === "all" ? "Aucune dépense enregistrée." : `Aucune dépense en ${monthLabel(month)}.`} Scanne ton premier reçu ↓</p>}
         {visible.map((r) => (
-          <button key={r.id} className="row" onClick={() => { setError(""); setDraft(r); setIsNew(false); }}>
+          <div key={r.id} className="row-wrap">
+          <button className="row" onClick={() => { setError(""); setDraft(r); setIsNew(false); }}>
             {r.image ? <img src={r.image} alt="" /> : <div className="noimg">—</div>}
             <div className="row-main">
               <div className="row-top">
@@ -184,6 +205,8 @@ export default function App() {
               {!isConsistent(r) && <div className="warn-small">⚠ montants à vérifier</div>}
             </div>
           </button>
+          <button className="trash" onClick={() => remove(r)} aria-label={`Supprimer ${r.fournisseur || "la dépense"}`} title="Supprimer">🗑</button>
+          </div>
         ))}
       </section>
 
@@ -214,12 +237,19 @@ export default function App() {
           settings={settings}
           onSave={save}
           onCancel={() => { setDraft(null); setError(""); }}
-          onDelete={() => remove(draft.id)}
+          onDelete={() => remove(draft)}
           onZoom={() => setLightbox(draft.image)}
         />
       )}
 
       {showSettings && <Settings count={rows.length} settings={settings} onSave={updateSettings} onClose={() => setShowSettings(false)} />}
+
+      {undo && (
+        <div className="toast">
+          <span>Dépense supprimée</span>
+          <button className="link" onClick={restore}>Annuler</button>
+        </div>
+      )}
 
       {lightbox && (
         <div className="lightbox" onClick={() => setLightbox(null)}>

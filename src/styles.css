@@ -99,3 +99,10 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 
 .lightbox { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.9); display: grid; place-items: center; z-index: 20; padding: 12px; }
 .lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+.row-wrap { display: flex; gap: 6px; align-items: stretch; }
+.row-wrap .row { flex: 1; min-width: 0; }
+.trash { flex-shrink: 0; width: 44px; border: 1px solid var(--line); background: var(--card); border-radius: var(--radius); font-size: 17px; cursor: pointer; opacity: 0.7; }
+.trash:active { background: #fdecea; opacity: 1; }
+.toast { position: fixed; left: 16px; right: 16px; bottom: calc(84px + env(safe-area-inset-bottom)); max-width: 608px; margin: 0 auto; background: var(--ink); color: #fff; border-radius: 12px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; z-index: 15; box-shadow: 0 6px 20px rgba(0,0,0,.2); }
+.toast .link { color: #ffb36b; }
