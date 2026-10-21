@@ -9,13 +9,23 @@ import { exportCSV, exportHTML } from "./lib/export.js";
 const MONTHS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
 const monthLabel = (ym) => (ym === "all" ? "Tout" : `${MONTHS[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`);
 const currentMonth = () => new Date().toISOString().slice(0, 7);
+const MONTH_KEY = "scan-depenses-mois";
+function loadMonth() {
+  try {
+    return localStorage.getItem(MONTH_KEY) || "all";
+  } catch {
+    return "all";
+  }
+}
 const frDate = (iso) => (iso ? iso.split("-").reverse().join("/") : "—");
 
 const SpeechRecognition = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
 
 export default function App() {
   const [rows, setRows] = useState([]);
-  const [month, setMonth] = useState(currentMonth());
+  // Par défaut on affiche toutes les dépenses : une facture datée d'un autre mois
+  // ne doit jamais sembler « disparue ».
+  const [month, setMonthState] = useState(loadMonth);
   const [draft, setDraft] = useState(null); // dépense en cours d'édition
   const [isNew, setIsNew] = useState(false);
   const [busy, setBusy] = useState(""); // message de chargement
@@ -25,6 +35,15 @@ export default function App() {
   const [lightbox, setLightbox] = useState(null);
   const cameraRef = useRef();
   const galleryRef = useRef();
+
+  function setMonth(m) {
+    setMonthState(m);
+    try {
+      localStorage.setItem(MONTH_KEY, m);
+    } catch {
+      /* sans importance */
+    }
+  }
 
   useEffect(() => {
     listExpenses().then(setRows).catch(() => setError("Impossible de lire les dépenses enregistrées."));
@@ -38,6 +57,7 @@ export default function App() {
   }, [rows]);
 
   const visible = useMemo(() => (month === "all" ? rows : rows.filter((r) => (r.date || "").startsWith(month))), [rows, month]);
+  const hiddenCount = rows.length - visible.length;
   const sum = totals(visible);
   const exportLabel = month === "all" ? "toutes" : month;
 
@@ -74,9 +94,17 @@ export default function App() {
   async function save(finalDraft) {
     if (!finalDraft) return;
     const toSave = { ...finalDraft, updatedAt: Date.now() };
-    await saveExpense(toSave);
-    setRows(await listExpenses());
-    if (toSave.date) setMonth(toSave.date.slice(0, 7));
+    try {
+      await saveExpense(toSave);
+      const fresh = await listExpenses();
+      if (!fresh.some((r) => r.id === toSave.id)) throw new Error("La dépense n'a pas été retrouvée après l'enregistrement.");
+      setRows(fresh);
+    } catch (err) {
+      setError(`Enregistrement impossible : ${err.message || err}. Vérifie que tu n'es pas en navigation privée.`);
+      return;
+    }
+    if (month !== "all" && toSave.date && !toSave.date.startsWith(month)) setMonth(toSave.date.slice(0, 7));
+    setError("");
     setDraft(null);
   }
 
@@ -132,6 +160,13 @@ export default function App() {
       )}
       {error && !draft && <div className="error">{error}</div>}
 
+      {hiddenCount > 0 && (
+        <div className="notice">
+          {hiddenCount} autre{hiddenCount > 1 ? "s" : ""} dépense{hiddenCount > 1 ? "s" : ""} dans d'autres mois.{" "}
+          <button className="link" onClick={() => setMonth("all")}>Tout afficher</button>
+        </div>
+      )}
+
       <section className="list">
         {visible.length === 0 && <p className="empty">Aucune dépense pour {monthLabel(month)}. Scanne ton premier reçu ↓</p>}
         {visible.map((r) => (
@@ -184,7 +219,7 @@ export default function App() {
         />
       )}
 
-      {showSettings && <Settings settings={settings} onSave={updateSettings} onClose={() => setShowSettings(false)} />}
+      {showSettings && <Settings count={rows.length} settings={settings} onSave={updateSettings} onClose={() => setShowSettings(false)} />}
 
       {lightbox && (
         <div className="lightbox" onClick={() => setLightbox(null)}>
@@ -372,9 +407,13 @@ function Editor({ draft, setDraft, isNew, busy, setBusy, error, setError, settin
   );
 }
 
-function Settings({ settings, onSave, onClose }) {
+function Settings({ count, settings, onSave, onClose }) {
   const [apiKey, setApiKey] = useState(settings.apiKey);
   const [model, setModel] = useState(settings.model);
+  const [persisted, setPersisted] = useState(null);
+  useEffect(() => {
+    navigator.storage?.persisted?.().then(setPersisted).catch(() => {});
+  }, []);
   return (
     <div className="sheet-backdrop">
       <div className="sheet">
@@ -397,6 +436,11 @@ function Settings({ settings, onSave, onClose }) {
             <option value="claude-haiku-5-5">Haiku 5.5 — plus rapide et moins cher</option>
           </select>
         </label>
+        <p className="hint">
+          {count} dépense{count > 1 ? "s" : ""} enregistrée{count > 1 ? "s" : ""} sur cet appareil
+          {persisted === true && " · stockage protégé"}
+          {persisted === false && " · stockage non protégé : pense à exporter chaque mois"}.
+        </p>
         <div className="sheet-actions">
           <button className="btn primary grow" onClick={() => { onSave({ ...settings, apiKey, model }); onClose(); }}>Enregistrer</button>
         </div>
